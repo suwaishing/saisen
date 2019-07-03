@@ -1,23 +1,317 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>Document</title>
-    <link rel="stylesheet" href="css/style.css">
-
+    <meta charset="utf-8">
+    <title>THREE.CannonDebugRenderer example</title>
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+    </style>
 </head>
 
 <body>
-    <canvas id="myCanvas"></canvas>
-
     <script src="js/three.min.js"></script>
     <script src="js/GLTFLoader.js"></script>
-    <script src="js/OrbitControls.js"></script>
-    <script src="js/dat.gui.min.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/TrackballControls.js"></script>
+    <script src="js/cannon.min.js"></script>
+    <script src="js/Detector.js"></script>
+    <script src="js/CannonDebugRenderer.js"></script>
+
+    <script>
+
+        var world;
+        var fixedTimeStep = 1 / 120;
+        var maxSubSteps = 3;
+        var mass = 5;
+        var lastTime;
+
+        var camera, scene, renderer, controls;
+        var geometry, material, mesh;
+        var container, camera, scene, renderer, cannonDebugRenderer;
+
+        // To be synced
+        var meshes = [];
+        var bodies = [];
+
+        if (!Detector.webgl) Detector.addGetWebGLMessage();
+
+        initCannon();
+        initThree();
+        // addSphere();
+        //addBox();
+        // addCylinder();
+        // addTrimesh();
+        addPlane();
+        // addHeightfield();
+        addCompound();
+        animate();
+
+        function initThree() {
+
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+            // scene
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x000000, 500, 10000);
+
+            // camera
+            camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.5, 10000);
+            camera.position.set(0, 3, 20);
+            camera.up.set(0, 1, 0);
+            camera.lookAt(new THREE.Vector3(0, 0, 0));
+            scene.add(camera);
+
+            material = new THREE.MeshLambertMaterial({ color: 0x777777 });
+
+            // lights
+            scene.add(new THREE.AmbientLight(0x111111));
+            var light = new THREE.DirectionalLight(0xffffff, 1.75);
+            var d = 20;
+            light.position.set(40, 20, 30);
+            scene.add(light);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(scene.fog.color);
+
+            container.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', onWindowResize, false);
+
+            controls = new THREE.TrackballControls(camera, renderer.domElement);
+
+            cannonDebugRenderer = new THREE.CannonDebugRenderer(scene, world);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            controls.screen.width = window.innerWidth;
+            controls.screen.height = window.innerHeight;
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            if (time && lastTime) {
+                var dt = time - lastTime;
+                world.step(fixedTimeStep, dt / 1000, maxSubSteps);
+            }
+
+            updateMeshPositions();
+            cannonDebugRenderer.update();
+            controls.update();
+            renderer.render(scene, camera);
+            lastTime = time;
+        }
+
+        function updateMeshPositions() {
+            for (var i = 0; i !== meshes.length; i++) {
+                meshes[i].position.copy(bodies[i].position);
+                meshes[i].quaternion.copy(bodies[i].quaternion);
+            }
+        }
+
+        function initCannon() {
+            world = new CANNON.World();
+            world.gravity.set(0, -10, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+        }
+
+        function addPlane() {
+            // Physics
+            var shape = new CANNON.Plane();
+            var body = new CANNON.Body({ mass: 0 });
+            body.addShape(shape);
+            body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(body);
+            bodies.push(body);
+
+            // Graphics
+            geometry = new THREE.PlaneGeometry(100, 100, 1, 1);
+            mesh = new THREE.Mesh(geometry, material);
+            mesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+            scene.add(mesh);
+            meshes.push(mesh);
+        }
+
+        function addBox() {
+            // Physics
+            var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
+            var body = new CANNON.Body({ mass: mass });
+            body.addShape(shape);
+            body.position.set(1, 5, 0);
+            world.addBody(body);
+            bodies.push(body);
+
+            // Graphics
+            var cubeGeo = new THREE.BoxGeometry(1, 1, 1, 10, 10);
+            cubeMesh = new THREE.Mesh(cubeGeo, material);
+            meshes.push(cubeMesh);
+            scene.add(cubeMesh);
+        }
+
+        function addSphere() {
+            // Physics
+            var body = new CANNON.Body({ mass: mass });
+            var shape = new CANNON.Sphere(1);
+            body.addShape(shape);
+            body.position.set(-1, 5, 0);
+            world.addBody(body);
+            bodies.push(body);
+
+            // Graphics
+            var sphereGeo = new THREE.SphereGeometry(0.95, 20, 20);
+            sphereMesh = new THREE.Mesh(sphereGeo, material);
+            meshes.push(sphereMesh);
+            scene.add(sphereMesh);
+        }
+
+        function addCylinder() {
+            // Physics
+            var body = new CANNON.Body({ mass: mass });
+            var shape = new CANNON.Cylinder(1, 1, 1, 10);
+            var quat = new CANNON.Quaternion(0.5, 0, 0, 0.5);
+            quat.normalize();
+            body.addShape(shape, new CANNON.Vec3, quat);
+            body.position.set(-3, 5, 0);
+            world.addBody(body);
+            bodies.push(body);
+
+            // Graphics
+            var geo = new THREE.CylinderGeometry(1, 1, 1, 20, 20, false);
+            var mesh = new THREE.Mesh(geo, material);
+            meshes.push(mesh);
+            scene.add(mesh);
+        }
+
+        function addTrimesh() {
+            // Physics
+            var body = new CANNON.Body({ mass: mass });
+            var shape = new CANNON.Trimesh.createTorus(1, 0.3, 16, 16);
+            body.addShape(shape);
+            body.position.set(-6, 5, 0);
+            world.addBody(body);
+            bodies.push(body);
+
+            // Graphics
+            var geo = new THREE.TorusGeometry(1, 0.3, 16, 100);
+            var mesh = new THREE.Mesh(geo, material);
+            meshes.push(mesh);
+            scene.add(mesh);
+        }
+
+        function dropBall(){
+            var body = new CANNON.Body({ mass: 1});
+            var shape = new CANNON.Sphere(0.1);
+            body.addShape(shape);
+            body.position.set(Math.random(),5,Math.random())
+            bodies.push(body);
+            world.add(body);
+
+            // 3
+            var sphereGeo = new THREE.SphereGeometry(0.1, 20, 20);
+            sphereMesh = new THREE.Mesh(sphereGeo);
+            meshes.push(sphereMesh);
+            scene.add(sphereMesh);
+
+            
+        }
+
+        window.addEventListener("click",dropBall)
+
+        function addHeightfield() {
+            // Physics
+            var body = new CANNON.Body({ mass: 0 });
+            var matrix = [];
+            var sizeX = 20, sizeY = 20;
+            for (var i = 0; i < sizeX; i++) {
+                matrix.push([]);
+                for (var j = 0; j < sizeY; j++) {
+                    var height = Math.cos(i / sizeX * Math.PI * 2) * Math.cos(j / sizeY * Math.PI * 2);
+                    matrix[i].push(height);
+                }
+            }
+            var shape = new CANNON.Heightfield(matrix, { elementSize: 0.5 });
+            var quat = new CANNON.Quaternion(-0.5, 0, 0, 0.5);
+            quat.normalize();
+            body.addShape(shape, new CANNON.Vec3, quat);
+            body.position.set(6, 1, 0);
+            world.addBody(body);
+            bodies.push(body);
+
+            // Graphics: empty for now
+            var geo = new THREE.Geometry();
+            var mesh = new THREE.Mesh(geo, material);
+            meshes.push(mesh);
+            scene.add(mesh);
+        }
+        function addCompound() {
+            //var compoundShape = new CANNON.Compound();
+            var s = .8;
+
+            // Now create a Body for our Compound
+
+            var body = new CANNON.Body({ mass: 1});
+            body.position.set(0, 1, 0);
+            // body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+
+            // Use a box shape as child shape
+            var shape = new CANNON.Box(new CANNON.Vec3(1.101, 0.126, 2));
+            body.addShape(shape, new CANNON.Vec3(0,0.125,0));
+            
+            var shape2 = new CANNON.Box(new CANNON.Vec3(0.05, 1.1, 1.9));
+            body.addShape(shape2, new CANNON.Vec3(-0.96,1.1,0));
+            body.addShape(shape2, new CANNON.Vec3(0.96,1.1,0));
+            var shape3 = new CANNON.Box(new CANNON.Vec3(0.9, 1.1, 0.035));
+            body.addShape(shape3, new CANNON.Vec3(0,1.1,1.9));
+            body.addShape(shape3, new CANNON.Vec3(0,1.1,-1.9));
+
+            var column = new CANNON.Box(new CANNON.Vec3(0.9, 0.055, 0.055));
+            //column.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+            body.addShape(column, new CANNON.Vec3(0,2.11,-1.475),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,-1.095),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,-0.7),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,-0.31),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,0.1),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,0.555),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,1.01),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+            body.addShape(column, new CANNON.Vec3(0,2.11,1.47),new CANNON.Quaternion(1,0,0,Math.cos(45)));
+
+            var shape4 = new CANNON.Box(new CANNON.Vec3(1.101, 0.126, 2));
+            body.addShape(shape, new CANNON.Vec3(0,0.125,0));
+            // body.addShape(shape, new CANNON.Vec3(s,0,0));
+            // body.addShape(shape, new CANNON.Vec3(s,0,s));
+            // body.addShape(shape, new CANNON.Vec3(-s,0,0));
+            // body.addShape(shape, new CANNON.Vec3(0,0,-s));
+            // We can add the same shape several times to position child shapes within the Compound.
+            
+
+
+            bodies.push(body);
+
+            world.addBody(body);
+
+            //Graphics
+            let loader = new THREE.GLTFLoader();
+            loader.load('js/saisen.glb', function (gltf) {
+                var thing = gltf.scene;
+                //thing.scale.set(.5, .5, .5);
+                thing.position.set(-4,0,0);
+                scene.add(thing);
+                meshes.push(thing);
+            });
+        }
+    </script>
 </body>
 
 </html>
