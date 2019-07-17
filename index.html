@@ -19,7 +19,6 @@
 <body>
     <script src="js/three.min.js"></script>
     <script src="js/GLTFLoader.js"></script>
-    <script src="js/TrackballControls.js"></script>
     <script src="js/cannon.min.js"></script>
     <script src="js/Detector.js"></script>
     <script src="js/CannonDebugRenderer.js"></script>
@@ -36,6 +35,15 @@
         var geometry, material, mesh;
         var container, camera, scene, renderer, cannonDebugRenderer;
 
+        var coinClone;
+
+        var gplane = new THREE.Plane();
+        var gplaneNormal = new THREE.Vector3();
+        var constraintDown = false;
+        var clickMarker=false;
+        var raycaster, mouse2D;
+        var jointBody, constrainedBody, mouseConstraint;
+
         // To be synced
         var meshes = [];
         var bodies = [];
@@ -45,14 +53,19 @@
         initCannon();
         initThree();
         // addSphere();
-        //addBox();
-        // addCylinder();
+        
         // addTrimesh();
         addPlane();
+        addBox();
+        //addCylinder();
         // addHeightfield();
-        addCompound();
+        //addCompound();
+        addSphereChain();
         animate();
-
+        
+        window.addEventListener("mousemove", onMouseMove, false);
+        window.addEventListener("mousedown", onMouseDown, false);
+        window.addEventListener("mouseup", onMouseUp, false);
         function initThree() {
 
             container = document.createElement('div');
@@ -86,17 +99,20 @@
 
             window.addEventListener('resize', onWindowResize, false);
 
-            controls = new THREE.TrackballControls(camera, renderer.domElement);
+            //controls = new THREE.TrackballControls(camera, renderer.domElement);
 
             cannonDebugRenderer = new THREE.CannonDebugRenderer(scene, world);
+            mouse2D = new THREE.Vector2();
+            raycaster = new THREE.Raycaster();
+
         }
 
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            controls.screen.width = window.innerWidth;
-            controls.screen.height = window.innerHeight;
+            //controls.screen.width = window.innerWidth;
+            //controls.screen.height = window.innerHeight;
         }
 
         function animate(time) {
@@ -106,10 +122,10 @@
                 var dt = time - lastTime;
                 world.step(fixedTimeStep, dt / 1000, maxSubSteps);
             }
-
+            
             updateMeshPositions();
             cannonDebugRenderer.update();
-            controls.update();
+            //controls.update();
             renderer.render(scene, camera);
             lastTime = time;
         }
@@ -125,6 +141,15 @@
             world = new CANNON.World();
             world.gravity.set(0, -10, 0);
             world.broadphase = new CANNON.NaiveBroadphase();
+
+            // Joint body
+            var shape = new CANNON.Sphere(0.1);
+            jointBody = new CANNON.Body({ mass: 0 });
+            jointBody.addShape(shape);
+            jointBody.collisionFilterGroup = 0;
+            jointBody.collisionFilterMask = 0;
+            world.addBody(jointBody);
+
         }
 
         function addPlane() {
@@ -149,7 +174,7 @@
             var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
             var body = new CANNON.Body({ mass: mass });
             body.addShape(shape);
-            body.position.set(1, 5, 0);
+            body.position.set(-3, 5, 0);
             world.addBody(body);
             bodies.push(body);
 
@@ -177,10 +202,20 @@
         }
 
         function addCylinder() {
-            // Physics
-            var body = new CANNON.Body({ mass: mass });
-            var shape = new CANNON.Cylinder(1, 1, 1, 10);
-            var quat = new CANNON.Quaternion(0.5, 0, 0, 0.5);
+            // // Physics
+            // var body = new CANNON.Body({ mass: mass });
+            // var shape = new CANNON.Cylinder(1.25, 1.25, 0.05, 32);
+            // var quat = new CANNON.Quaternion(0,0.7071,0,0.7071);
+            // quat.normalize();
+            // body.addShape(shape, new CANNON.Vec3(0,0,0), quat);
+            // body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+            // //body.position.set(0, 0, 0);
+            // world.addBody(body);
+            // bodies.push(body);
+
+            var body = new CANNON.Body({ mass: .1 });
+            var shape = new CANNON.Cylinder(.15, .15, 0.03, 12);
+            var quat = new CANNON.Quaternion(0.7071, 0,0, 0.7071);
             quat.normalize();
             body.addShape(shape, new CANNON.Vec3, quat);
             body.position.set(-3, 5, 0);
@@ -188,10 +223,22 @@
             bodies.push(body);
 
             // Graphics
-            var geo = new THREE.CylinderGeometry(1, 1, 1, 20, 20, false);
-            var mesh = new THREE.Mesh(geo, material);
-            meshes.push(mesh);
-            scene.add(mesh);
+            // var geo = new THREE.CylinderGeometry(1, 1, 1, 20, 20, false);
+            // var mesh = new THREE.Mesh(geo, material);
+            // meshes.push(mesh);
+            // scene.add(mesh);
+            let loader = new THREE.GLTFLoader();
+            loader.load('js/coinv3.glb', function (gltf) {
+                var thing = gltf.scene.children[0];
+                //thing.quaternion.set(0,0,0,0);
+                console.log(thing);
+                thing.scale.set(0.15, .15, .15);
+                //thing.rotation.y =45;
+                scene.add(thing);
+                meshes.push(thing);
+                coinClone = thing.clone();
+            });
+            scene.add(coinClone);
         }
 
         function addTrimesh() {
@@ -227,7 +274,7 @@
             
         }
 
-        window.addEventListener("click",dropBall)
+       //window.addEventListener("click",dropBall)
 
         function addHeightfield() {
             // Physics
@@ -254,6 +301,189 @@
             var mesh = new THREE.Mesh(geo, material);
             meshes.push(mesh);
             scene.add(mesh);
+        }
+        function addSphereChain(){
+            var size = 0.5;
+            var dist = size + 0.12;
+            //world.solver.setSpookParams(1e20,3);
+            var sphereShape = new CANNON.Box(new CANNON.Vec3(size/2,size,size/2));
+            var mass = 0;
+            var space = 0.15*size;
+            var lastBody = null;
+            var N = 10;
+            //world.solver.iterations = N; // To be able to propagate force throw the chain of N spheres, we need at least N solver iterations.
+            for (var i = 0; i < N; i++) {
+                // Create a new body
+                var spherebody = new CANNON.Body({ mass: i===0? mass:0.5 });
+                spherebody.addShape(sphereShape);
+                spherebody.position.set(0, (N - i) * 2*(size+space)+size*2+space, 0);
+                spherebody.linearDamping=0.01; // Damping makes the movement slow down with time
+                spherebody.angularDamping=0.01;
+                bodies.push(spherebody);
+                world.addBody(spherebody);
+                //demo.addVisual(spherebody);
+
+                var sphereGeo = new THREE.BoxGeometry(size,size*2,size, 10, 10);
+                sphereMesh = new THREE.Mesh(sphereGeo, material);
+                meshes.push(sphereMesh);
+                scene.add(sphereMesh);
+                // Connect this body to the last one added
+                // if(i!=0){
+                //     // Connect the current body to the last one
+                //     // We connect two corner points to each other.
+                //     var c1 = new CANNON.PointToPointConstraint(spherebody,new CANNON.Vec3(-size,size+space,0),lastBody,new CANNON.Vec3(-size,-size-space,0));
+                //     var c2 = new CANNON.PointToPointConstraint(spherebody,new CANNON.Vec3(size,size+space,0),lastBody,new CANNON.Vec3(size,-size-space,0));
+                //     world.addConstraint(c1);
+                //     world.addConstraint(c2);
+                // } else {
+                //     // First body is now static. The rest should be dynamic.
+                //     mass=0.3;
+                // }
+                if(lastBody){
+                  // Connect the current body to the last one
+                  var c = new CANNON.LockConstraint(spherebody, lastBody);
+                  world.addConstraint(c);
+                }
+
+                // Keep track of the lastly added body
+                lastBody = spherebody;
+            }
+        }
+        function setClickMarker(pos) {
+            if(!clickMarker){
+                var shape = new THREE.SphereGeometry(0.2, 8, 8);
+                var markerMaterial = new THREE.MeshLambertMaterial( { color: 0xff0000 } );
+                clickMarker = new THREE.Mesh(shape, markerMaterial);
+                scene.add(clickMarker);
+            }
+            clickMarker.visible = true;
+            clickMarker.position.copy(pos);
+        }
+
+        function removeClickMarker(){
+          clickMarker.visible = false;
+        }
+
+        function onMouseMove(e){
+            mouse2D.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse2D.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse2D, camera);
+            // Move and project on the plane
+            if (mouseConstraint) {
+                var pos = raycaster.ray.intersectPlane(gplane);
+                if (pos) {
+                    setClickMarker(pos.x, pos.y, pos.z, scene);
+                    moveJointToPoint(pos.x, pos.y, pos.z);
+                }
+            }
+        }
+
+        function onMouseDown(e){
+            e.preventDefault();
+            // Find mesh from a ray
+            var entity = raycaster.intersectObjects(meshes);
+            if (entity.length == 0) return;
+
+            var pos = entity[0].point;
+            if (pos && entity[0].object.geometry instanceof THREE.BoxGeometry) {
+                constraintDown = true;
+                // Set marker on contact point
+                setClickMarker(pos);
+
+                // Set the movement plane
+                setScreenPerpCenter(pos,camera);
+
+                var idx = meshes.indexOf(entity[0].object);
+                if (idx !== -1) {
+                    addMouseConstraint(pos.x, pos.y, pos.z, bodies[idx]);
+                }
+            }
+            
+        }
+
+        // This function creates a virtual movement plane for the mouseJoint to move in
+        function setScreenPerpCenter(point, camera) {
+            gplane.setFromNormalAndCoplanarPoint(gplaneNormal.subVectors(camera.position, point).normalize(), point);
+        }
+
+        function onMouseUp(e) {
+          constraintDown = false;
+          // remove the marker
+          removeClickMarker();
+
+          // Send the remove mouse joint to server
+          removeJointConstraint();
+        }
+
+        function projectOntoPlane(screenX,screenY,thePlane,camera) {
+            var x = screenX;
+            var y = screenY;
+            // project mouse to that plane
+            var ray = getRayCasterFromScreenCoord(screenX, screenX, camera);
+            var hit = ray.intersectObjects(meshes);
+            var trajectory = new THREE.Ray(hit[0].point, hit[0].point.sub(hit[0].point).normalize());
+            if(hit)
+                return trajectory;
+            return false;
+        }
+        function findNearestIntersectingObject(clientX,clientY,camera,objects) {
+            // Get the picking ray from the point
+            var ray = getRayCasterFromScreenCoord(clientX, clientY, camera);
+            // Find the closest intersecting object
+            // Now, cast the ray all render objects in the scene to see if they collide. Take the closest one.
+            var hits = ray.intersectObjects(objects);
+            var closest = false;
+            if (hits.length > 0) {
+                closest = hits[0];
+            }
+
+            return closest;
+        }
+
+        // Function that returns a raycaster to use to find intersecting objects
+        // in a scene given screen pos and a camera, and a projector
+        function getRayCasterFromScreenCoord (screenX, screenY, camera) {
+            
+            // Get 3D point form the client x y
+            mouse2D.x = (screenX /renderer.domElement.clientWidth) * 2 - 1;
+            mouse2D.y = -(screenY / renderer.domElement.clientHeight) * 2 + 1;
+            
+            return raycaster;
+        }
+
+        function addMouseConstraint(x,y,z,body) {
+          // The cannon body constrained by the mouse joint
+          constrainedBody = body;
+
+          // Vector to the clicked point, relative to the body
+          var v1 = new CANNON.Vec3(x,y,z).vsub(constrainedBody.position);
+
+          // Apply anti-quaternion to vector to tranform it into the local body coordinate system
+          var antiRot = constrainedBody.quaternion.inverse();
+          pivot = antiRot.vmult(v1); // pivot is not in local body coordinates
+
+          // Move the cannon click marker particle to the click position
+          jointBody.position.set(x,y,z);
+
+          // Create a new constraint
+          // The pivot for the jointBody is zero
+          mouseConstraint = new CANNON.PointToPointConstraint(constrainedBody, pivot, jointBody, new CANNON.Vec3() );
+
+          // Add the constriant to world
+          world.addConstraint(mouseConstraint);
+        }
+
+        // This functions moves the transparent joint body to a new postion in space
+        function moveJointToPoint(x,y,z) {
+            // Move the joint body to a new position
+            jointBody.position.set(x,y,z);
+            mouseConstraint.update();
+        }
+
+        function removeJointConstraint(){
+          // Remove constriant from world
+          world.removeConstraint(mouseConstraint);
+          mouseConstraint = false;
         }
         function addCompound() {
             //var compoundShape = new CANNON.Compound();
