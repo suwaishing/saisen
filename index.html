@@ -22,6 +22,7 @@
     <script src="js/cannon.min.js"></script>
     <script src="js/Detector.js"></script>
     <script src="js/CannonDebugRenderer.js"></script>
+    <script src="js/OrbitControls.js"></script>
 
     <script>
 
@@ -33,8 +34,8 @@
 
         var camera, scene, renderer, controls;
         var geometry, material, mesh;
-        var container, camera, scene, renderer, cannonDebugRenderer;
-
+        var container, cannonDebugRenderer;
+        var cam= new THREE.Vector3();
         var coinClone;
 
         var gplane = new THREE.Plane();
@@ -42,6 +43,7 @@
         var constraintDown = false;
         var clickMarker=false;
         var raycaster, mouse2D;
+        var intersection = new THREE.Vector3();
         var jointBody, constrainedBody, mouseConstraint;
 
         // To be synced
@@ -78,8 +80,6 @@
             // camera
             camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.5, 10000);
             camera.position.set(0, 3, 20);
-            camera.up.set(0, 1, 0);
-            camera.lookAt(new THREE.Vector3(0, 0, 0));
             scene.add(camera);
 
             material = new THREE.MeshLambertMaterial({ color: 0x777777 });
@@ -96,7 +96,7 @@
             renderer.setClearColor(scene.fog.color);
 
             container.appendChild(renderer.domElement);
-
+            controls = new THREE.OrbitControls(camera,renderer.domElement);
             window.addEventListener('resize', onWindowResize, false);
 
             //controls = new THREE.TrackballControls(camera, renderer.domElement);
@@ -111,8 +111,8 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            //controls.screen.width = window.innerWidth;
-            //controls.screen.height = window.innerHeight;
+            controls.screen.width = window.innerWidth;
+            controls.screen.height = window.innerHeight;
         }
 
         function animate(time) {
@@ -125,7 +125,7 @@
             
             updateMeshPositions();
             cannonDebugRenderer.update();
-            //controls.update();
+            controls.update();
             renderer.render(scene, camera);
             lastTime = time;
         }
@@ -174,7 +174,7 @@
             var shape = new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5));
             var body = new CANNON.Body({ mass: mass });
             body.addShape(shape);
-            body.position.set(-3, 5, 0);
+            body.position.set(-3, 0, 0);
             world.addBody(body);
             bodies.push(body);
 
@@ -304,7 +304,6 @@
         }
         function addSphereChain(){
             var size = 0.5;
-            var dist = size + 0.12;
             //world.solver.setSpookParams(1e20,3);
             var sphereShape = new CANNON.Box(new CANNON.Vec3(size/2,size,size/2));
             var mass = 0;
@@ -316,9 +315,7 @@
                 // Create a new body
                 var spherebody = new CANNON.Body({ mass: i===0? mass:0.5 });
                 spherebody.addShape(sphereShape);
-                spherebody.position.set(0, (N - i) * 2*(size+space)+size*2+space, 0);
-                spherebody.linearDamping=0.01; // Damping makes the movement slow down with time
-                spherebody.angularDamping=0.01;
+                spherebody.position.set(0, (N - i) * 2*size, 0);
                 bodies.push(spherebody);
                 world.addBody(spherebody);
                 //demo.addVisual(spherebody);
@@ -363,15 +360,20 @@
         function removeClickMarker(){
           clickMarker.visible = false;
         }
-
+        var lastPos = new THREE.Vector3();
         function onMouseMove(e){
+            e.preventDefault();
             mouse2D.x = (e.clientX / window.innerWidth) * 2 - 1;
             mouse2D.y = -(e.clientY / window.innerHeight) * 2 + 1;
             raycaster.setFromCamera(mouse2D, camera);
             // Move and project on the plane
             if (mouseConstraint) {
-                var pos = raycaster.ray.intersectPlane(gplane);
-                if (pos) {
+                controls.enabled= false;
+                var pos = raycaster.ray.intersectPlane(gplane,intersection);
+                //pos.clamp(new THREE.Vector3(-13,10,-13), new THREE.Vector3(13,0,13));
+                var distance = pos.distanceTo(new THREE.Vector3(0,12.575,0));
+                
+                if (pos&&distance<12) {
                     setClickMarker(pos.x, pos.y, pos.z, scene);
                     moveJointToPoint(pos.x, pos.y, pos.z);
                 }
@@ -379,13 +381,19 @@
         }
 
         function onMouseDown(e){
+            
             e.preventDefault();
+            if(!mouseConstraint){
+                controls.enabled=true;
+            }
+                
             // Find mesh from a ray
             var entity = raycaster.intersectObjects(meshes);
             if (entity.length == 0) return;
-
             var pos = entity[0].point;
+
             if (pos && entity[0].object.geometry instanceof THREE.BoxGeometry) {
+                controls.enabled= false;
                 constraintDown = true;
                 // Set marker on contact point
                 setClickMarker(pos);
@@ -398,16 +406,17 @@
                     addMouseConstraint(pos.x, pos.y, pos.z, bodies[idx]);
                 }
             }
-            
+
         }
 
         // This function creates a virtual movement plane for the mouseJoint to move in
         function setScreenPerpCenter(point, camera) {
-            gplane.setFromNormalAndCoplanarPoint(gplaneNormal.subVectors(camera.position, point).normalize(), point);
+            gplane.setFromNormalAndCoplanarPoint(gplaneNormal.subVectors(camera.position, point), point);
         }
 
         function onMouseUp(e) {
-          constraintDown = false;
+            constraintDown = false;
+            
           // remove the marker
           removeClickMarker();
 
